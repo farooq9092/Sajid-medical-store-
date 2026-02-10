@@ -1,307 +1,207 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from github import Github
-import io
-from datetime import datetime
-import pytz
+from datetime import datetime, timedelta
 
-# --- 1. Page Configuration ---
-st.set_page_config(page_title="Sajid Medical Store", page_icon="💊", layout="wide")
+# --- Page Configuration ---
+st.set_page_config(page_title="Synergy MSMS", page_icon="🏥", layout="wide")
 
-# Custom Styling
+# --- Custom Styling ---
 st.markdown("""
     <style>
-    .stMetric { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border: 1px solid #ccc; color: black; }
-    .target-card { 
-        background-color: #e8f5e9; 
-        padding: 25px; 
-        border-radius: 15px; 
-        text-align: center; 
-        border: 2px solid #2e7d32; 
-        margin-bottom: 20px; 
-        color: black;
+    .stMetric {
+        background-color: #f0f2f6;
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 5px solid #007bff;
     }
-    .expense-card { 
-        background-color: #ffebee; 
-        padding: 25px; 
-        border-radius: 15px; 
-        text-align: center; 
-        border: 2px solid #c62828; 
-        margin-bottom: 20px; 
-        color: black;
-    }
-    .stock-alert {
-        background-color: #fff3cd;
-        padding: 10px;
-        border-radius: 5px;
-        border: 1px solid #ffecb5;
-        color: #856404;
-        text-align: center;
-        font-weight: bold;
-    }
-    h1, h2, h3 { color: #2e7d32 !important; }
+    .expired { color: #dc3545; font-weight: bold; }
+    .warning { color: #ffc107; font-weight: bold; }
+    .good { color: #28a745; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. GitHub Auth ---
-try:
-    token = st.secrets["GITHUB_TOKEN"]
-    repo_name = st.secrets["REPO_NAME"]
-    g = Github(token)
-    repo = g.get_repo(repo_name)
-except Exception as e:
-    st.error(f"Secrets Missing! Settings check karein. Error: {e}")
-    st.stop()
+# --- Data Initialization (Simulating a Database) ---
+if 'inventory' not in st.session_state:
+    # seeding with some mock data based on the article's context
+    data = {
+        'ID': [101, 102, 103, 104, 105],
+        'Medicine Name': ['Amoxicillin 500mg', 'Paracetamol', 'Insulin Glargine', 'Vitamin C', 'Ibuprofen'],
+        'Category': ['Antibiotic', 'Pain Relief', 'Diabetes', 'Supplement', 'Pain Relief'],
+        'Stock': [50, 120, 4, 200, 15],
+        'Min_Stock_Level': [20, 50, 10, 30, 20],  # Threshold for auto-reorder
+        'Price': [15.00, 5.00, 1200.00, 10.00, 8.00],
+        'Expiry_Date': [
+            (datetime.now() + timedelta(days=365)).date(), # Good
+            (datetime.now() + timedelta(days=600)).date(), # Good
+            (datetime.now() + timedelta(days=10)).date(),  # Expiring Soon
+            (datetime.now() + timedelta(days=400)).date(), # Good
+            (datetime.now() - timedelta(days=5)).date()    # Expired
+        ]
+    }
+    st.session_state.inventory = pd.DataFrame(data)
 
-# --- 3. Functions ---
-CSV_FILE = "medical_data.csv"
-STOCK_FILE = "stock_data.csv" # New file for stock
+# Helper function to get dataframe
+def get_data():
+    return st.session_state.inventory
 
-COLS = ['Date', 'Category', 'Item', 'Cost', 'Sale', 'Profit', 'Payment']
-STOCK_COLS = ['Medicine Name', 'Type', 'Quantity', 'Status'] # Status = Available or Order Now
+# --- Sidebar Navigation ---
+st.sidebar.title("🏥 Synergy MSMS")
+st.sidebar.info("Medical Store Management System")
+menu = st.sidebar.radio("Navigation", ["📊 Dashboard", "💊 Inventory & Stock", "⚡ Alerts & Reordering", "🛒 Point of Sale"])
 
-def load_data(file_name, columns):
-    try:
-        contents = repo.get_contents(file_name)
-        raw_df = pd.read_csv(io.StringIO(contents.decoded_content.decode('utf-8')))
-        # Ensure columns match
-        if set(columns).issubset(raw_df.columns):
-            raw_df = raw_df[columns]
-        else:
-            raw_df = pd.DataFrame(columns=columns)
-            
-        if 'Date' in raw_df.columns:
-            raw_df['Date'] = pd.to_datetime(raw_df['Date'], errors='coerce')
-            raw_df = raw_df.dropna(subset=['Date'])
-        return raw_df
-    except Exception:
-        return pd.DataFrame(columns=columns)
-
-def save_data(df, file_name, message="Update"):
-    csv_buffer = io.StringIO()
-    save_df = df.copy()
-    if 'Date' in save_df.columns:
-        save_df['Date'] = pd.to_datetime(save_df['Date']).dt.strftime('%Y-%m-%d')
+# --- 1. DASHBOARD ---
+if menu == "📊 Dashboard":
+    st.title("🏥 Administrator Dashboard")
+    st.markdown("Overview of operational efficiency and inventory health.")
     
-    save_df.to_csv(csv_buffer, index=False)
-    try:
-        contents = repo.get_contents(file_name)
-        repo.update_file(file_name, message, csv_buffer.getvalue(), contents.sha)
-        return True
-    except Exception:
-        try:
-            repo.create_file(file_name, "Initial Create", csv_buffer.getvalue())
-            return True
-        except: return False
-
-# --- 4. Logic ---
-pk_tz = pytz.timezone('Asia/Karachi')
-now = datetime.now(pk_tz)
-
-df = load_data(CSV_FILE, COLS)
-stock_df = load_data(STOCK_FILE, STOCK_COLS)
-
-# Header
-st.markdown("<h1 style='text-align: center;'>🏥 Sajid Medical Store</h1>", unsafe_allow_html=True)
-st.markdown(f"<p style='text-align: center;'><b>Date:</b> {now.strftime('%d %B, %Y')}</p>", unsafe_allow_html=True)
-st.markdown("---")
-
-menu = st.sidebar.radio("Main Menu", ["📝 Daily Sale Entry", "💊 Stock / Order List", "📊 Dashboard", "📂 Archive", "⚙️ Manage Sales"])
-
-# --- SECTION 1: ENTRY ---
-if menu == "📝 Daily Sale Entry":
-    st.header("📝 Nayi Sale/Kharcha Entry")
-    with st.form("entry_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            date_input = st.date_input("Tareekh", now.date())
-            cat = st.selectbox("Category", ["Medicine (Tabs/Syrup)", "Injections/Drips", "General Items (Pampers etc)", "Ghar ka Kharcha", "Shop Expense (Bil/Rent)"])
-            item = st.text_input("Item Name / Detail")
-        with c2:
-            cost = st.number_input("Cost (Khareed)", 0.0)
-            sale = st.number_input("Sale (Becha)", 0.0)
-            pay = st.selectbox("Payment Type", ["Cash", "EasyPaisa", "Udhaar"])
-        
-        if st.form_submit_button("💾 Save Entry"):
-            if item:
-                # Ghar ke kharche ya Shop expense pe profit nahi hota
-                if "Kharcha" in cat or "Expense" in cat:
-                    profit = 0
-                else:
-                    profit = sale - cost
-                
-                new_row = pd.DataFrame([[pd.to_datetime(date_input), cat, item, cost, sale, profit, pay]], columns=COLS)
-                df = pd.concat([df, new_row], ignore_index=True)
-                if save_data(df, CSV_FILE, f"Added: {item}"):
-                    st.success(f"✅ {item} Saved!")
-                    st.rerun()
-
-# --- SECTION 2: STOCK MANAGEMENT (NEW) ---
-elif menu == "💊 Stock / Order List":
-    st.header("💊 Medicine Stock & Order List")
+    df = get_data()
     
-    # Tabs layout
-    tab1, tab2 = st.tabs(["➕ Add/Update Stock", "📋 View Lists"])
+    # Logic for Metrics
+    total_products = len(df)
+    total_stock_value = (df['Stock'] * df['Price']).sum()
+    
+    # Low Stock Logic
+    low_stock_count = df[df['Stock'] <= df['Min_Stock_Level']].shape[0]
+    
+    # Expiry Logic
+    today = datetime.now().date()
+    df['Expiry_Date'] = pd.to_datetime(df['Expiry_Date']).dt.date
+    expired_count = df[df['Expiry_Date'] < today].shape[0]
+    expiring_soon_count = df[(df['Expiry_Date'] >= today) & (df['Expiry_Date'] <= today + timedelta(days=30))].shape[0]
+
+    # 
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Medicines", total_products)
+    col2.metric("Inventory Value", f"${total_stock_value:,.2f}")
+    col3.metric("⚠️ Low Stock Alerts", low_stock_count, delta_color="inverse")
+    col4.metric("📅 Expiring Soon/Expired", expired_count + expiring_soon_count, delta_color="inverse")
+
+    st.divider()
+    
+    # Visual Charts
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Stock Levels by Medicine")
+        st.bar_chart(df.set_index("Medicine Name")['Stock'])
+    
+    with c2:
+        st.subheader("Category Distribution")
+        cat_counts = df['Category'].value_counts()
+        st.bar_chart(cat_counts)
+
+# --- 2. INVENTORY & STOCK ---
+elif menu == "💊 Inventory & Stock":
+    st.title("📦 Inventory Management")
+    st.markdown("Centralized data storage for medication details.")
+
+    df = get_data()
+    
+    # Tab layout
+    tab1, tab2 = st.tabs(["View Inventory", "Add New Medicine"])
     
     with tab1:
-        st.subheader("Update Medicine Stock")
-        with st.form("stock_form", clear_on_submit=True):
-            col_s1, col_s2 = st.columns(2)
-            with col_s1:
-                med_name = st.text_input("Medicine Name (e.g., Panadol)")
-                med_type = st.selectbox("Type", ["Tablet", "Syrup", "Injection", "Cream/Ointment", "Other"])
-            with col_s2:
-                qty = st.text_input("Quantity Remaining (e.g. 5 boxes, 10 strips)")
-                status = st.radio("Mangwani hai?", ["No (Stock OK)", "Yes (Order Now)"], horizontal=True)
-            
-            if st.form_submit_button("Update Stock"):
-                if med_name:
-                    clean_status = "Order Now" if "Yes" in status else "OK"
-                    
-                    # Check if medicine exists, update it, else add new
-                    if not stock_df.empty and med_name in stock_df['Medicine Name'].values:
-                        idx = stock_df[stock_df['Medicine Name'] == med_name].index[0]
-                        stock_df.at[idx, 'Quantity'] = qty
-                        stock_df.at[idx, 'Status'] = clean_status
-                        stock_df.at[idx, 'Type'] = med_type
-                        msg = "Updated"
-                    else:
-                        new_stock = pd.DataFrame([[med_name, med_type, qty, clean_status]], columns=STOCK_COLS)
-                        stock_df = pd.concat([stock_df, new_stock], ignore_index=True)
-                        msg = "Added"
-                    
-                    if save_data(stock_df, STOCK_FILE, f"Stock {msg}: {med_name}"):
-                        st.success(f"{med_name} list mein update ho gayi!")
-                        st.rerun()
-
+        st.dataframe(df.style.format({"Price": "${:.2f}"}), use_container_width=True)
+    
     with tab2:
-        # Filter for Order List
-        order_list = stock_df[stock_df['Status'] == 'Order Now']
-        
-        st.markdown("### ⚠️ Order List (Jo Cheezein Mangwani Hain)")
-        if not order_list.empty:
-            st.markdown("""<div class="stock-alert">Niche di gayi medicines khatam hain, distributor se mangwa lein!</div>""", unsafe_allow_html=True)
-            st.table(order_list[['Medicine Name', 'Type', 'Quantity']])
-        else:
-            st.info("Filhal koi cheez order nahi karni.")
+        with st.form("add_med_form"):
+            c1, c2 = st.columns(2)
+            new_name = c1.text_input("Medicine Name")
+            new_cat = c2.selectbox("Category", ["Antibiotic", "Pain Relief", "Diabetes", "Supplement", "Cardio", "Other"])
             
-        st.markdown("---")
-        st.markdown("### ✅ Full Stock List")
-        st.dataframe(stock_df, use_container_width=True)
+            c3, c4 = st.columns(2)
+            new_stock = c3.number_input("Initial Stock", min_value=1)
+            new_min = c4.number_input("Min Stock Level (Reorder Point)", min_value=1)
+            
+            c5, c6 = st.columns(2)
+            new_price = c5.number_input("Price per Unit", min_value=0.1)
+            new_expiry = c6.date_input("Expiry Date")
+            
+            submitted = st.form_submit_button("Add to Inventory")
+            
+            if submitted:
+                new_id = df['ID'].max() + 1
+                new_row = {
+                    'ID': new_id, 'Medicine Name': new_name, 'Category': new_cat,
+                    'Stock': new_stock, 'Min_Stock_Level': new_min,
+                    'Price': new_price, 'Expiry_Date': new_expiry
+                }
+                st.session_state.inventory = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                st.success(f"{new_name} added successfully!")
+                st.rerun()
+
+# --- 3. ALERTS & REORDERING (The "Automation" Part) ---
+elif menu == "⚡ Alerts & Reordering":
+    st.title("⚡ Automation Center")
+    st.markdown("Automated alerts for low stock and expiration to reduce wastage.")
+
+    # 
+
+    df = get_data()
+    today = datetime.now().date()
+    df['Expiry_Date'] = pd.to_datetime(df['Expiry_Date']).dt.date
+
+    # --- Section A: Low Stock (Automated Reordering) ---
+    st.subheader("🔴 Low Stock Alerts (Reordering Needed)")
+    low_stock_df = df[df['Stock'] <= df['Min_Stock_Level']]
+    
+    if not low_stock_df.empty:
+        st.error(f"{len(low_stock_df)} items are below safety levels.")
+        st.dataframe(low_stock_df[['Medicine Name', 'Stock', 'Min_Stock_Level', 'Category']])
         
-        # Delete Button for Stock
-        st.markdown("#### Delete Medicine")
-        del_name = st.selectbox("Select to Delete", stock_df['Medicine Name'].unique())
-        if st.button("❌ Remove from List"):
-            stock_df = stock_df[stock_df['Medicine Name'] != del_name]
-            save_data(stock_df, STOCK_FILE, f"Deleted Stock: {del_name}")
+        if st.button("Generate Reorder Request for Suppliers"):
+            # Simulation of the "Automated stock reordering" mentioned in article
+            st.toast("✅ Purchase Orders sent to suppliers via Email/EDI!")
+    else:
+        st.success("All stock levels are healthy.")
+
+    st.divider()
+
+    # --- Section B: Expiry Monitoring ---
+    st.subheader("📅 Expiry Monitor")
+    
+    # Filter 1: Already Expired
+    expired_df = df[df['Expiry_Date'] < today]
+    if not expired_df.empty:
+        st.error("🚨 The following items have EXPIRED. Please remove from shelf.")
+        st.table(expired_df[['Medicine Name', 'Expiry_Date', 'Stock']])
+    
+    # Filter 2: Expiring Soon (30 Days)
+    soon_df = df[(df['Expiry_Date'] >= today) & (df['Expiry_Date'] <= today + timedelta(days=30))]
+    if not soon_df.empty:
+        st.warning("⚠️ The following items expire within 30 days. Consider discounting.")
+        st.table(soon_df[['Medicine Name', 'Expiry_Date', 'Stock']])
+
+# --- 4. POINT OF SALE ---
+elif menu == "🛒 Point of Sale":
+    st.title("🛒 Dispensing & Billing")
+    st.markdown("Process prescriptions and update inventory automatically.")
+    
+    df = get_data()
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Select Medicine
+        med_list = df['Medicine Name'].tolist()
+        selected_med_name = st.selectbox("Select Medicine", med_list)
+        
+        # Get details of selected med
+        med_row = df[df['Medicine Name'] == selected_med_name].iloc[0]
+        current_stock = med_row['Stock']
+        price = med_row['Price']
+        
+        st.info(f"Available Stock: {current_stock} units | Price: ${price}")
+        
+        qty = st.number_input("Quantity", min_value=1, max_value=int(current_stock))
+        
+        total_bill = qty * price
+        st.metric("Total Bill", f"${total_bill:,.2f}")
+        
+        if st.button("Confirm Sale"):
+            # Update Stock Logic
+            idx = df[df['Medicine Name'] == selected_med_name].index[0]
+            st.session_state.inventory.at[idx, 'Stock'] = current_stock - qty
+            st.success("Sale Recorded! Inventory Updated.")
             st.rerun()
 
-# --- SECTION 3: DASHBOARD ---
-elif menu == "📊 Dashboard":
-    st.header(f"📊 Report: {now.strftime('%B %Y')}")
-    if not df.empty:
-        df_month = df[(df['Date'].dt.month == now.month) & (df['Date'].dt.year == now.year)]
-        df_today = df[df['Date'].dt.date == now.date()]
-
-        # Filter Sales vs Expense
-        sales_data = df_month[~df_month['Category'].str.contains("Kharcha|Expense")]
-        expense_data = df_month[df_month['Category'].str.contains("Kharcha|Expense")]
-
-        m_profit = sales_data['Profit'].sum()
-        m_expense = expense_data['Cost'].sum()
-        net_savings = m_profit - m_expense
-
-        target = 100000 # Example Target for Medical Store
-        
-        row_cards = st.columns(2)
-        with row_cards[0]:
-            st.markdown(f"""
-                <div class="target-card">
-                    <h3>💰 Monthly Profit (Bachat)</h3>
-                    <h1>Rs. {m_profit:,.0f}</h1>
-                    <p>Target: Rs. {target:,.0f}</p>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        with row_cards[1]:
-            st.markdown(f"""
-                <div class="expense-card">
-                    <h3>🏠 Shop/Home Expense</h3>
-                    <h1>Rs. {m_expense:,.0f}</h1>
-                    <p style="font-weight:bold; color:black;">Net Savings: Rs. {net_savings:,.0f}</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-        st.markdown("---")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Month Sale", f"Rs. {sales_data['Sale'].sum():,.0f}")
-        col2.metric("Aaj ki Sale", f"Rs. {df_today[~df_today['Category'].str.contains('Kharcha')]['Sale'].sum():,.0f}")
-        col3.metric("Aaj ka Profit", f"Rs. {df_today[~df_today['Category'].str.contains('Kharcha')]['Profit'].sum():,.0f}")
-
-        st.markdown("### 📋 Aaj Ki Tafseel")
-        if not df_today.empty:
-            st.dataframe(df_today[['Item', 'Category', 'Sale', 'Profit', 'Payment']], use_container_width=True)
-        else:
-            st.info("Aaj koi entry nahi hui.")
-
-# --- SECTION 4: ARCHIVE ---
-elif menu == "📂 Archive":
-    st.header("📂 Purana Monthly Record")
-    if not df.empty:
-        df['Month_Year'] = df['Date'].dt.strftime('%B %Y')
-        
-        summary = df.groupby('Month_Year').apply(lambda x: pd.Series({
-            'Total Sale': x[~x['Category'].str.contains("Kharcha")]['Sale'].sum(),
-            'Total Profit': x[~x['Category'].str.contains("Kharcha")]['Profit'].sum(),
-            'Total Expense': x[x['Category'].str.contains("Kharcha")]['Cost'].sum(),
-        })).reset_index().sort_values(by='Month_Year', ascending=False)
-        
-        summary['Net Saving'] = summary['Total Profit'] - summary['Total Expense']
-        
-        st.dataframe(summary.style.format("Rs. {:,.0f}", subset=['Total Sale', 'Total Profit', 'Total Expense', 'Net Saving']), use_container_width=True)
-        
-        st.markdown("---")
-        sel_m = st.selectbox("Mahina Select Karein:", summary['Month_Year'].unique())
-        detail_df = df[df['Month_Year'] == sel_m].sort_values(by='Date', ascending=False)
-        st.dataframe(detail_df[COLS], use_container_width=True)
-
-# --- SECTION 5: MANAGE ---
-elif menu == "⚙️ Manage Sales":
-    st.header("⚙️ Edit or Delete Entries")
-    if not df.empty:
-        # Show recent entries
-        st.write("Last 10 Entries:")
-        st.dataframe(df.tail(10).iloc[::-1][COLS], use_container_width=True)
-        
-        st.markdown("---")
-        action_idx = st.number_input("Enter Index Number to Delete/Edit (See row number on left):", 0, len(df)-1, value=len(df)-1)
-        
-        c1, c2 = st.columns(2)
-        if c1.button("🗑️ Delete Permanently"):
-            df = df.drop(df.index[action_idx])
-            save_data(df, CSV_FILE, "Deleted Entry")
-            st.warning("Deleted!")
-            st.rerun()
-            
-        if c2.button("✏️ Edit This"):
-            st.session_state.edit_idx = action_idx
-            st.session_state.edit_mode = True
-
-        if st.session_state.get("edit_mode", False):
-            idx = st.session_state.edit_idx
-            row = df.iloc[idx]
-            with st.form("edit_form"):
-                st.write(f"Editing: {row['Item']}")
-                n_sale = st.number_input("New Sale", value=float(row['Sale']))
-                n_cost = st.number_input("New Cost", value=float(row['Cost']))
-                if st.form_submit_button("Update"):
-                    df.at[idx, 'Sale'] = n_sale
-                    df.at[idx, 'Cost'] = n_cost
-                    if "Kharcha" not in row['Category']:
-                        df.at[idx, 'Profit'] = n_sale - n_cost
-                    save_data(df, CSV_FILE, "Edited Entry")
-                    st.session_state.edit_mode = False
-                    st.success("Updated!")
-                    st.rerun()
