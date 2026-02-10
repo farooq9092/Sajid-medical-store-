@@ -1,1 +1,1 @@
-# Sajid-medical-store-
+pip install streamlit pandas
